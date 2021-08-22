@@ -3,14 +3,16 @@ package entrance
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/doniyorbek7376/asia_pacific_bus_terminal/passenger"
 )
 
 type entrance struct {
 	ctx        context.Context
-	name       string
+	id         int
 	passengers <-chan passenger.PassengerI
+	wg         *sync.WaitGroup
 }
 
 type EntranceI interface {
@@ -19,16 +21,17 @@ type EntranceI interface {
 
 var _ EntranceI = &entrance{}
 
-func NewEntrance(ctx context.Context, name string, passengers <-chan passenger.PassengerI) EntranceI {
+func NewEntrance(ctx context.Context, id int, passengers <-chan passenger.PassengerI, wg *sync.WaitGroup) EntranceI {
 	return &entrance{
 		ctx:        ctx,
-		name:       name,
+		id:         id,
 		passengers: passengers,
+		wg:         wg,
 	}
 }
 
 func (e *entrance) String() string {
-	return fmt.Sprintf("Entrance-%v", e.name)
+	return fmt.Sprintf("Entrance-%v", e.id)
 }
 
 func (e *entrance) Run() <-chan passenger.PassengerI {
@@ -37,17 +40,20 @@ func (e *entrance) Run() <-chan passenger.PassengerI {
 
 func (e *entrance) handlePassengers(passengers <-chan passenger.PassengerI) <-chan passenger.PassengerI {
 	ch := make(chan passenger.PassengerI)
-
 	go func() {
+		defer e.wg.Done()
+		defer fmt.Printf("%v: closed\n", e)
 		defer close(ch)
 		for p := range passengers {
 			fmt.Printf("%v: %v came to the entrance\n", e, p)
 			p.EnterBuilding()
-			select {
-			case <-e.ctx.Done():
-				return
-			case ch <- p:
-			}
+			go func(p passenger.PassengerI) {
+				select {
+				case <-e.ctx.Done():
+					return
+				case ch <- p:
+				}
+			}(p)
 		}
 	}()
 
